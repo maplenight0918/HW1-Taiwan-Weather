@@ -1,0 +1,17 @@
+# 網站外觀設定（此檔不含機密，可以上傳 GitHub）
+[theme]
+base = "light"
+primaryColor = "#2F6FDE"
+backgroundColor = "#F3F5F7"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#17202A"
+borderColor = "#E3E7EC"
+baseRadius = "0.75rem"
+showWidgetBorder = true
+font = "Noto Sans TC:https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap"
+
+[client]
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false

@@ -19,8 +19,9 @@ from src.cwa_api import (
     normalize_city,
     parse_all_forecasts,
     parse_forecast,
+    describe_period,
     regional_averages,
-    weather_icon,
+    weather_kind,
 )
 
 SAMPLE = json.loads((Path(__file__).parent / "sample_response.json").read_text("utf-8"))
@@ -92,10 +93,24 @@ def test_regional_averages_ignore_missing_values():
     assert north["avg_temp"] is None  # 完全沒有資料
 
 
-def test_weather_icon_mapping():
-    assert weather_icon("多雲短暫陣雨") == "🌧️"
-    assert weather_icon("晴時多雲") == "🌤️"
-    assert weather_icon("陰天") == "☁️"
+def test_weather_kind_mapping():
+    assert weather_kind("多雲短暫陣雨") == "rain"
+    assert weather_kind("多雲午後短暫雷陣雨") == "thunder"
+    assert weather_kind("晴時多雲") == "partly"
+    assert weather_kind("晴天") == "sunny"
+    assert weather_kind("陰天") == "cloudy"
+
+
+def test_describe_period_uses_relative_day_names():
+    from datetime import datetime
+
+    now = datetime(2026, 10, 6, 13, 0)
+    assert describe_period("2026-10-06 12:00:00", now) == "今天白天"
+    assert describe_period("2026-10-06 18:00:00", now) == "今晚"
+    assert describe_period("2026-10-07 06:00:00", now) == "明天白天"
+    assert describe_period("2026-10-07 18:00:00", now) == "明晚"
+    assert describe_period("2026-10-07 00:00:00", now) == "明天凌晨"
+    assert describe_period("壞掉的時間", now) == "預報時段"
 
 
 if __name__ == "__main__":

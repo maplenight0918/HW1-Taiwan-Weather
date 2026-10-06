@@ -5,11 +5,12 @@ from .cwa_api import (
     CITY_COORDS,
     CWAError,
     ForecastPeriod,
+    describe_period,
     get_all_forecasts,
     get_api_key,
     get_city_forecast,
     regional_averages,
-    weather_icon,
+    weather_kind,
 )
 
 __all__ = [
@@ -17,9 +18,10 @@ __all__ = [
     "CITY_COORDS",
     "CWAError",
     "ForecastPeriod",
+    "describe_period",
     "get_all_forecasts",
     "get_api_key",
     "get_city_forecast",
     "regional_averages",
-    "weather_icon",
+    "weather_kind",
 ]

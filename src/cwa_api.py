@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import os
 from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import requests
 
 API_URL = "https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-C0032-001"
 REQUEST_TIMEOUT = 15  # 秒
+TAIWAN_TZ = timezone(timedelta(hours=8))  # 台灣沒有日光節約時間，固定 UTC+8
 
 # 22 個縣市（CWA 使用「臺」而非「台」）
 CITIES = [
@@ -324,23 +326,41 @@ def get_city_forecast(api_key: str, city: str) -> list[ForecastPeriod]:
     return parse_forecast(fetch_forecast(api_key, city), city)
 
 
-def weather_icon(weather: str) -> str:
-    """依天氣描述給一個對應的 emoji，讓畫面更好讀。"""
+def weather_kind(weather: str) -> str:
+    """把 CWA 的天氣描述歸類，供 UI 選擇圖示與配色。
+
+    回傳 thunder / rain / snow / fog / partly / sunny / cloudy 其中之一。
+    """
     text = weather or ""
     if "雷" in text:
-        return "⛈️"
+        return "thunder"
     if "雨" in text:
-        return "🌧️"
+        return "rain"
     if "雪" in text:
-        return "❄️"
+        return "snow"
     if "霧" in text:
-        return "🌫️"
-    if "晴" in text and "雲" in text:
-        return "🌤️"
+        return "fog"
+    if "晴" in text and ("雲" in text or "陰" in text):
+        return "partly"
     if "晴" in text:
-        return "☀️"
-    if "陰" in text:
-        return "☁️"
-    if "雲" in text:
-        return "⛅"
-    return "🌡️"
+        return "sunny"
+    return "cloudy"
+
+
+def describe_period(start_time: str, now: Optional[datetime] = None) -> str:
+    """把時段開始時間轉成口語名稱，例如「今天白天」「今晚」「明天白天」。"""
+    try:
+        start = datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return "預報時段"
+
+    today = (now or datetime.now(TAIWAN_TZ)).date()
+    day_offset = (start.date() - today).days
+    day_names = {0: "今天", 1: "明天", 2: "後天"}
+    day = day_names.get(day_offset, f"{start.month}/{start.day}")
+
+    if start.hour >= 18:
+        return {"今天": "今晚", "明天": "明晚"}.get(day, f"{day}晚上")
+    if start.hour < 6:
+        return f"{day}凌晨"
+    return f"{day}白天"
