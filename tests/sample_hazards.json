@@ -1,0 +1,118 @@
+{
+  "success": "true",
+  "result": {
+    "resource_id": "W-C0033-001",
+    "fields": [
+      {
+        "id": "locationName",
+        "type": "String"
+      },
+      {
+        "id": "geocode",
+        "type": "Double"
+      },
+      {
+        "id": "language",
+        "type": "String"
+      },
+      {
+        "id": "phenomena",
+        "type": "String"
+      },
+      {
+        "id": "significance",
+        "type": "String"
+      },
+      {
+        "id": "startTime",
+        "type": "Timestamp"
+      },
+      {
+        "id": "endTime",
+        "type": "Timestamp"
+      }
+    ]
+  },
+  "records": {
+    "location": [
+      {
+        "locationName": "臺南市",
+        "geocode": 67.0,
+        "hazardConditions": {
+          "hazards": [
+            {
+              "info": {
+                "language": "zh-TW",
+                "phenomena": "大雨",
+                "significance": "特報"
+              },
+              "validTime": {
+                "startTime": "2026-10-06 15:00:00",
+                "endTime": "2026-10-06 23:00:00"
+              }
+            },
+            {
+              "info": {
+                "language": "zh-TW",
+                "phenomena": "陸上強風",
+                "significance": "特報"
+              },
+              "validTime": {
+                "startTime": "2026-10-06 16:50:00",
+                "endTime": "2026-10-07 23:00:00"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "locationName": "臺北市",
+        "geocode": 63.0,
+        "hazardConditions": {
+          "hazards": []
+        }
+      },
+      {
+        "locationName": "屏東縣",
+        "geocode": 10013.0,
+        "hazardConditions": {
+          "hazards": [
+            {
+              "info": {
+                "language": "zh-TW",
+                "phenomena": "陸上強風",
+                "significance": "特報"
+              },
+              "validTime": {
+                "startTime": "2026-10-06 08:00:00",
+                "endTime": "2026-10-06 23:00:00"
+              }
+            },
+            {
+              "info": {
+                "language": "zh-TW",
+                "phenomena": "颱風",
+                "significance": "警報"
+              },
+              "validTime": {
+                "startTime": "2026-10-06 11:30:00",
+                "endTime": "2026-10-08 00:00:00"
+              }
+            },
+            {
+              "info": {
+                "language": "zh-TW",
+                "phenomena": "大雨",
+                "significance": "特報"
+              },
+              "validTime": {
+                "startTime": "2026-10-05 08:00:00",
+                "endTime": "2026-10-05 20:00:00"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

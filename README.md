@@ -4,7 +4,7 @@
 使用者可以在網頁上選擇任一縣市，立即查看未來 36 小時的天氣狀況、最低溫、
 最高溫與降雨機率。
 
-> 資料集：`F-C0032-001`「一般天氣預報-今明 36 小時天氣預報」
+> 資料集：`F-C0032-001`「一般天氣預報-今明 36 小時天氣預報」、`W-C0033-001`「天氣特報-各別縣市地區目前之天氣警特報情形」
 
 ---
 
@@ -13,6 +13,8 @@
 - 連接 CWA 開放資料 API，一次取得全台 **22 縣市** 的 36 小時預報
 - 頁首選單切換縣市，切換時不需重新呼叫 API（資料快取 10 分鐘）
 - **主卡片**：所選縣市目前時段的天氣狀況、最低溫、最高溫、降雨機率與體感，底色與圖示隨天氣變化
+- **天氣特報橫幅**：所選縣市有大雨、強風、颱風等特報時，頁面上方顯示醒目提示（警報與豪雨、颱風以紅色顯示）；地圖上以橘色虛線框標出有特報的縣市
+- **出門建議**：把預報翻譯成口語提醒，例如「記得帶傘：今晚降雨機率 70%」「早晚溫差大：相差 9 度，建議洋蔥式穿搭」，並依特報給出對應建議（規則見 `src/advice.py`）
 - **未來 36 小時**：三個時段以「今天白天／今晚／明天白天」等口語名稱並排顯示
 - **趨勢圖**：氣溫以浮動長條呈現「最低溫～最高溫」區間，另有降雨機率長條圖
 - **完整預報表格**：放在可展開區塊中
@@ -41,11 +43,14 @@ HW1-Taiwan-Weather/
 ├── app.py                        # 頁面流程：要顯示哪些區塊、放在哪裡
 ├── src/
 │   ├── __init__.py
-│   ├── cwa_api.py                # CWA API 呼叫、資料解析、區域平均（不含 UI）
+│   ├── cwa_api.py                # CWA API 呼叫、預報與特報解析、區域平均（不含 UI）
+│   ├── advice.py                 # 出門建議的判斷規則（不含 UI）
 │   └── ui.py                     # 外觀：CSS、天氣圖示、自訂 HTML 卡片
 ├── tests/
-│   ├── sample_response.json      # 測試用的 API 回應範例
-│   └── test_cwa_api.py           # 解析邏輯的測試
+│   ├── sample_response.json      # 預報 API 回應範例
+│   ├── sample_hazards.json       # 特報 API 回應範例
+│   ├── test_cwa_api.py           # 預報解析的測試
+│   └── test_hazards_advice.py    # 特報解析與出門建議規則的測試
 ├── .streamlit/
 │   ├── config.toml               # 佈景主題（顏色、字型），可上傳
 │   └── secrets.toml.example      # Streamlit secrets 範本
@@ -57,7 +62,8 @@ HW1-Taiwan-Weather/
 
 程式分成三層：
 
-- `src/cwa_api.py`：只負責呼叫 API、處理錯誤、把 JSON 整理成 `ForecastPeriod` 物件，以及計算區域平均。
+- `src/cwa_api.py`：只負責呼叫 API、處理錯誤、把 JSON 整理成 `ForecastPeriod` / `Hazard` 物件，以及計算區域平均。
+- `src/advice.py`：出門建議的規則，門檻值集中在檔案開頭，方便調整。
 - `src/ui.py`：只負責外觀，把資料轉成 HTML 卡片與樣式。
 - `app.py`：決定頁面上有哪些區塊與排列方式，不直接處理 JSON。
 
@@ -133,10 +139,11 @@ streamlit run app.py
 
 ## 執行測試
 
-解析邏輯使用 `tests/sample_response.json` 當作假資料，不需要 API 金鑰也能測試：
+測試使用 `tests/` 裡的範例回應當作假資料，不需要 API 金鑰也能執行：
 
 ```bash
 python3 tests/test_cwa_api.py
+python3 tests/test_hazards_advice.py
 ```
 
 ---

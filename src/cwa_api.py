@@ -19,6 +19,7 @@ import requests
 from requests.adapters import HTTPAdapter
 
 API_URL = "https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-C0032-001"
+HAZARD_URL = "https://opendata.cwa.gov.tw/api/v1/rest/datastore/W-C0033-001"  # 天氣特報
 REQUEST_TIMEOUT = 15  # 秒
 TAIWAN_TZ = timezone(timedelta(hours=8))  # 台灣沒有日光節約時間，固定 UTC+8
 
@@ -124,6 +125,27 @@ class ForecastPeriod:
         return asdict(self)
 
 
+@dataclass
+class Hazard:
+    """一則天氣特報，例如「大雨特報」「陸上強風特報」「颱風警報」。"""
+
+    phenomena: str      # 現象：大雨、陸上強風、颱風…
+    significance: str   # 等級：特報、警報
+    start_time: str
+    end_time: str
+
+    @property
+    def title(self) -> str:
+        return f"{self.phenomena}{self.significance}"
+
+    @property
+    def is_severe(self) -> bool:
+        """警報等級，或豪雨、颱風這類高風險現象，UI 以紅色顯示。"""
+        return self.significance == "警報" or any(
+            word in self.phenomena for word in ("豪雨", "颱風")
+        )
+
+
 def get_api_key() -> Optional[str]:
     """依序從環境變數、.env、Streamlit secrets 取得 API 金鑰。
 
@@ -161,25 +183,17 @@ def normalize_city(city: str) -> str:
     return city.strip().replace("台", "臺")
 
 
-def fetch_forecast(api_key: str, city: Optional[str] = None) -> dict[str, Any]:
-    """向 CWA API 查詢 36 小時預報，回傳原始 JSON。
-
-    city 省略時一次取得全部 22 縣市（地圖需要全部資料）。
-    """
+def _request(url: str, api_key: str, params: dict[str, str]) -> dict[str, Any]:
+    """呼叫 CWA API 並做統一的錯誤處理，回傳原始 JSON。"""
     if not api_key:
         raise CWAError("尚未設定 CWA API 金鑰。")
 
     # 金鑰放在 HTTP header 而非網址參數，避免出現在網址、錯誤訊息或紀錄中
     headers = {"Authorization": api_key}
-    params = {"elementName": ",".join(ELEMENT_FIELDS)}
-    if city:
-        params["locationName"] = normalize_city(city)
 
     # 錯誤訊息只寫原因分類，不附上原始例外內容（其中可能含有網址等細節）
     try:
-        response = _session.get(
-            API_URL, headers=headers, params=params, timeout=REQUEST_TIMEOUT
-        )
+        response = _session.get(url, headers=headers, params=params, timeout=REQUEST_TIMEOUT)
     except requests.exceptions.Timeout as exc:
         raise CWAError("連線 CWA API 逾時，請稍後再試。") from exc
     except requests.exceptions.SSLError as exc:
@@ -204,6 +218,17 @@ def fetch_forecast(api_key: str, city: Optional[str] = None) -> dict[str, Any]:
         raise CWAError("CWA API 回報查詢失敗，請確認金鑰與查詢條件。")
 
     return payload
+
+
+def fetch_forecast(api_key: str, city: Optional[str] = None) -> dict[str, Any]:
+    """向 CWA API 查詢 36 小時預報，回傳原始 JSON。
+
+    city 省略時一次取得全部 22 縣市（地圖需要全部資料）。
+    """
+    params = {"elementName": ",".join(ELEMENT_FIELDS)}
+    if city:
+        params["locationName"] = normalize_city(city)
+    return _request(API_URL, api_key, params)
 
 
 def _locations(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -351,6 +376,46 @@ def regional_averages(
             }
         )
     return results
+
+
+def parse_hazards(
+    payload: dict[str, Any], now: Optional[datetime] = None
+) -> dict[str, list[Hazard]]:
+    """整理天氣特報，回傳 {縣市: [特報…]}，只包含目前仍有效、且有特報的縣市。
+
+    W-C0033-001 的結構：records.location[].hazardConditions.hazards[]，
+    每則有 info.phenomena / info.significance / validTime.startTime / endTime。
+    """
+    current = (now or datetime.now(TAIWAN_TZ)).strftime("%Y-%m-%d %H:%M:%S")
+    hazards_by_city: dict[str, list[Hazard]] = {}
+
+    for location in _locations(payload):
+        conditions = location.get("hazardConditions") or {}
+        hazards = []
+        for item in conditions.get("hazards") or []:
+            info = item.get("info") or {}
+            valid = item.get("validTime") or {}
+            hazard = Hazard(
+                phenomena=info.get("phenomena") or "天氣",
+                significance=info.get("significance") or "特報",
+                start_time=valid.get("startTime", ""),
+                end_time=valid.get("endTime", ""),
+            )
+            # 時間格式固定為 YYYY-MM-DD HH:MM:SS，可直接用字串比較；已結束的略過
+            if hazard.end_time and hazard.end_time < current:
+                continue
+            hazards.append(hazard)
+
+        if hazards:
+            hazards.sort(key=lambda h: (not h.is_severe, h.start_time))
+            hazards_by_city[location.get("locationName", "")] = hazards
+
+    return hazards_by_city
+
+
+def get_hazards(api_key: str) -> dict[str, list[Hazard]]:
+    """取得全台目前有效的天氣特報。"""
+    return parse_hazards(_request(HAZARD_URL, api_key, {}))
 
 
 def get_city_forecast(api_key: str, city: str) -> list[ForecastPeriod]:

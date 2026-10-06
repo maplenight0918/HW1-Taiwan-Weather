@@ -7,7 +7,8 @@ app.py 負責「放什麼」，這個檔案負責「長什麼樣子」。
 from html import escape
 from typing import Optional
 
-from .cwa_api import ForecastPeriod, describe_period, weather_kind
+from .advice import Advice
+from .cwa_api import ForecastPeriod, Hazard, describe_period, weather_kind
 
 # 顏色集中在這裡，圖表與地圖也共用同一組
 INK = "#17202A"
@@ -30,6 +31,18 @@ _ICON_PATHS = {
     "fog": '<path d="M17.5 13H8a5 5 0 1 1 1.4-9.8A6 6 0 0 1 20.8 5 4 4 0 0 1 17.5 13z"/><path d="M4 17h16M7 21h10"/>',
     "snow": '<path d="M17.5 15H8a5 5 0 1 1 1.4-9.8A6 6 0 0 1 20.8 7 4 4 0 0 1 17.5 15z"/><path d="M8 19h.01M12 19h.01M16 19h.01M10 22h.01M14 22h.01"/>',
 }
+# 出門建議的圖示與顏色
+_ADVICE_ICONS = {
+    "umbrella": ('<path d="M22 12a10 10 0 0 0-20 0z"/><path d="M12 12v7a2.5 2.5 0 0 1-5 0"/>', "#2F6FDE"),
+    "layers": ('<path d="M20.4 3.5 16 2a4 4 0 0 1-8 0L3.6 3.5a2 2 0 0 0-1.3 2.2l.6 3.5a1 1 0 0 0 1 .8H6v10a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V10h2.1a1 1 0 0 0 1-.8l.6-3.5a2 2 0 0 0-1.3-2.2z"/>', "#7A5AF8"),
+    "cold": ('<path d="M14 14.8V3.5a2.5 2.5 0 0 0-5 0v11.3a4.5 4.5 0 1 0 5 0z"/>', "#3B7DD8"),
+    "heat": (_ICON_PATHS["sunny"], "#E07B39"),
+    "humid": ('<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/><path d="M9.5 14.5a2.5 2.5 0 0 0 2.5 2.5"/>', "#D98A2B"),
+    "wind": ('<path d="M9.6 4.6A2 2 0 1 1 11 8H2M12.6 19.4A2 2 0 1 0 14 16H2M17.7 7.7A2.5 2.5 0 1 1 19.5 12H2"/>', "#0E8A7E"),
+    "alert": ('<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>', "#C2410C"),
+    "ok": ('<circle cx="12" cy="12" r="9.5"/><path d="m8 12.5 2.7 2.7L16.5 9.5"/>', "#2E9E5B"),
+}
+
 _RAIN_DROP = '<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>'
 
 # 不同天氣的主卡片底色與圖示顏色
@@ -97,6 +110,24 @@ CSS = f"""
 [data-testid="stMetricLabel"] p {{ font-size: .9rem; font-weight: 700; color: {INK}; }}
 [data-testid="stMetricValue"] {{ font-size: 1.9rem; font-weight: 500; font-variant-numeric: tabular-nums; }}
 
+.alert-banner {{ display: flex; gap: .9rem; align-items: flex-start; padding: .95rem 1.2rem;
+    border-radius: 14px; border: 1px solid #F3C98B; background: #FFF6E8; color: #7A3E06; margin-bottom: 1rem; }}
+.alert-banner.is-severe {{ border-color: #F4B4AE; background: #FEF0EF; color: #8E1F14; }}
+.alert-banner svg {{ flex-shrink: 0; margin-top: .1rem; }}
+.alert-title {{ font-weight: 700; }}
+.alert-items {{ display: flex; flex-wrap: wrap; gap: .4rem .5rem; margin-top: .4rem; }}
+.alert-chip {{ font-size: .82rem; padding: .12rem .6rem; border-radius: 999px; background: rgba(255,255,255,.75);
+    border: 1px solid currentColor; }}
+.alert-note {{ font-size: .84rem; color: {MUTED}; margin: -.2rem 0 1rem; }}
+
+.advice-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: .75rem; }}
+.advice-item {{ display: flex; gap: .85rem; align-items: flex-start; background: #FFFFFF;
+    border: 1px solid {LINE}; border-radius: 14px; padding: .9rem 1.1rem; }}
+.advice-icon {{ flex-shrink: 0; width: 38px; height: 38px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center; }}
+.advice-title {{ font-weight: 700; color: {INK}; }}
+.advice-detail {{ font-size: .86rem; color: {MUTED}; margin-top: .15rem; line-height: 1.55; }}
+
 .footnote {{ margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid {LINE};
     font-size: .8rem; color: {MUTED}; }}
 .footnote a {{ color: {MUTED}; }}
@@ -119,7 +150,10 @@ def _compact(markup: str) -> str:
 
 
 def icon(kind: str, size: int = 28, color: str = INK) -> str:
-    paths = _ICON_PATHS.get(kind, _ICON_PATHS["cloudy"])
+    return icon_path(_ICON_PATHS.get(kind, _ICON_PATHS["cloudy"]), size, color)
+
+
+def icon_path(paths: str, size: int = 28, color: str = INK) -> str:
     return (
         f'<svg width="{size}" height="{size}" viewBox="0 0 24 24" fill="none" '
         f'stroke="{color}" stroke-width="1.6" stroke-linecap="round" '
@@ -242,6 +276,50 @@ def range_bar_html(low: Optional[float], high: Optional[float]) -> str:
     """)
 
 
+def hazard_banner_html(city: str, city_hazards: list[Hazard], all_hazards: dict) -> str:
+    """頁面上方的特報提示。所選縣市有特報時顯示醒目橫幅，否則只顯示一行全台概況。"""
+    if city_hazards:
+        severe = any(h.is_severe for h in city_hazards)
+        color = "#B42318" if severe else "#B45309"
+        chips = "".join(
+            f'<span class="alert-chip">{escape(h.title)}・至 {escape(h.end_time[5:16].replace("-", "/"))}</span>'
+            for h in city_hazards
+        )
+        return _compact(f"""
+            <div class="alert-banner{' is-severe' if severe else ''}">
+                {icon_path(_ADVICE_ICONS["alert"][0], 22, color)}
+                <div>
+                    <div class="alert-title">{escape(city)}目前有 {len(city_hazards)} 則天氣特報</div>
+                    <div class="alert-items">{chips}</div>
+                </div>
+            </div>
+        """)
+    if all_hazards:
+        kinds = sorted({h.title for hazards in all_hazards.values() for h in hazards})
+        return (
+            f'<div class="alert-note">{escape(city)}目前沒有天氣特報。全台另有 {len(all_hazards)} 個縣市發布'
+            f'{escape("、".join(kinds))}，地圖上以虛線框標示。</div>'
+        )
+    return ""
+
+
+def advice_html(advice: list[Advice]) -> str:
+    """出門建議：每則一張小卡，左邊是圖示，右邊是標題與原因。"""
+    items = []
+    for item in advice:
+        paths, color = _ADVICE_ICONS.get(item.kind, _ADVICE_ICONS["ok"])
+        items.append(f"""
+            <div class="advice-item">
+                <div class="advice-icon" style="background:{color}14">{icon_path(paths, 22, color)}</div>
+                <div>
+                    <div class="advice-title">{escape(item.title)}</div>
+                    <div class="advice-detail">{escape(item.detail)}</div>
+                </div>
+            </div>
+        """)
+    return _compact(f'<div class="advice-grid">{"".join(items)}</div>')
+
+
 def region_detail_html(pop_text: str) -> str:
     """區域卡片底部的小字：平均降雨機率。"""
     return f'<div class="region-cities">平均降雨機率 {escape(pop_text)}</div>'
@@ -251,6 +329,6 @@ def footnote_html(updated_at: str) -> str:
     return _compact(f"""
         <div class="footnote">
             資料來源：<a href="https://opendata.cwa.gov.tw/" target="_blank">交通部中央氣象署 氣象開放資料平臺</a>
-            （F-C0032-001）· 資料每 10 分鐘更新 · 本頁取得時間 {escape(updated_at)}
+            （F-C0032-001 預報、W-C0033-001 天氣特報）· 資料每 10 分鐘更新 · 本頁取得時間 {escape(updated_at)}
         </div>
     """)

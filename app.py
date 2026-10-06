@@ -11,6 +11,7 @@ import pandas as pd
 import streamlit as st
 
 from src import ui
+from src.advice import build_advice
 from src.cwa_api import (
     CITIES,
     CITY_COORDS,
@@ -20,6 +21,7 @@ from src.cwa_api import (
     describe_period,
     get_all_forecasts,
     get_api_key,
+    get_hazards,
     regional_averages,
 )
 
@@ -37,6 +39,12 @@ def load_all_forecasts(api_key: str):
     """一次取得全部縣市的預報並快取，切換縣市時不必重新呼叫 API。"""
     fetched_at = datetime.now(TAIWAN_TZ).strftime("%m/%d %H:%M")
     return get_all_forecasts(api_key), fetched_at
+
+
+@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
+def load_hazards(api_key: str):
+    """全台天氣特報，與預報分開快取。"""
+    return get_hazards(api_key)
 
 
 def html(markup: str) -> None:
@@ -89,6 +97,7 @@ def render_header():
     with button_col:
         if st.button("重新整理", width="stretch", help="清除快取並重新向 CWA 取得資料"):
             load_all_forecasts.clear()
+            load_hazards.clear()
     return city
 
 
@@ -156,7 +165,7 @@ def render_forecast_table(forecasts) -> None:
         st.dataframe(table, width="stretch", hide_index=True)
 
 
-def build_map_data(all_forecasts) -> pd.DataFrame:
+def build_map_data(all_forecasts, hazards=None) -> pd.DataFrame:
     """整理每個縣市「最近時段」的預報，作為地圖的資料。"""
     rows = []
     for city, forecasts in all_forecasts.items():
@@ -175,14 +184,15 @@ def build_map_data(all_forecasts) -> pd.DataFrame:
                 "label": f"{low}~{high}°",
                 "weather": period.weather,
                 "pop": "-" if period.pop is None else period.pop,
+                "hazard": "、".join(h.title for h in (hazards or {}).get(city, [])) or "無",
             }
         )
     return pd.DataFrame(rows)
 
 
-def render_map(all_forecasts, selected_city: str) -> None:
-    """全台縣市地圖：區塊顏色代表最高溫，標籤為「最低~最高」溫度。"""
-    map_data = build_map_data(all_forecasts)
+def render_map(all_forecasts, selected_city: str, hazards=None) -> None:
+    """全台縣市地圖：區塊顏色代表最高溫，標籤為「最低~最高」溫度，虛線框為有特報的縣市。"""
+    map_data = build_map_data(all_forecasts, hazards)
     if map_data.empty:
         return
 
@@ -191,6 +201,7 @@ def render_map(all_forecasts, selected_city: str) -> None:
         alt.Tooltip("weather:N", title="天氣"),
         alt.Tooltip("label:N", title="氣溫"),
         alt.Tooltip("pop:N", title="降雨機率 (%)"),
+        alt.Tooltip("hazard:N", title="天氣特報"),
     ]
     counties = (
         alt.Chart(alt.topo_feature(TAIWAN_TOPOJSON_URL, "counties"))
@@ -198,7 +209,7 @@ def render_map(all_forecasts, selected_city: str) -> None:
         .transform_calculate(city="replace(datum.properties.COUNTYNAME, '台', '臺')")
         .transform_lookup(
             lookup="city",
-            from_=alt.LookupData(map_data, "city", ["max_temp", "label", "weather", "pop"]),
+            from_=alt.LookupData(map_data, "city", ["max_temp", "label", "weather", "pop", "hazard"]),
         )
     )
     fill = counties.mark_geoshape(stroke="white", strokeWidth=1).encode(
@@ -223,7 +234,14 @@ def render_map(all_forecasts, selected_city: str) -> None:
         text="label:N"
     )
 
-    chart = alt.layer(fill, highlight, dots, halo, labels).project(type="mercator").properties(
+    layers = [fill]
+    if hazards:
+        layers.append(
+            counties.transform_filter(alt.FieldOneOfPredicate(field="city", oneOf=list(hazards)))
+            .mark_geoshape(fill=None, stroke="#C2410C", strokeWidth=1.4, strokeDash=[4, 3])
+        )
+    layers += [highlight, dots, halo, labels]
+    chart = alt.layer(*layers).project(type="mercator").properties(
         height=640
     )
     st.altair_chart(style_chart(chart), theme=None, use_container_width=True)
@@ -265,12 +283,25 @@ def main() -> None:
         st.caption("請確認網路連線與 API 金鑰是否正確，或稍後按「重新整理」再試一次。")
         return
 
+    # 特報失敗不影響預報顯示，只提示一行
+    try:
+        hazards = load_hazards(api_key)
+    except CWAError:
+        hazards = None
+
+    st.write("")
+    if hazards is None:
+        st.caption("天氣特報資料暫時無法取得，以下僅顯示預報。")
+    else:
+        html(ui.hazard_banner_html(city, hazards.get(city, []), hazards))
+
     forecasts = all_forecasts.get(city)
     if not forecasts:
         st.warning(f"目前查不到「{city}」的預報資料。")
     else:
-        st.write("")
         html(ui.hero_html(city, forecasts[0]))
+        html(ui.section_title("出門建議", "依未來 36 小時預報與天氣特報整理"))
+        html(ui.advice_html(build_advice(forecasts, (hazards or {}).get(city, []))))
         html(ui.section_title("未來 36 小時", "每 12 小時一個時段"))
         html(ui.forecast_cards_html(forecasts))
         html(ui.section_title("氣溫與降雨趨勢"))
@@ -278,10 +309,12 @@ def main() -> None:
         render_forecast_table(forecasts)
 
     first_period = next(iter(all_forecasts.values()))[0]
-    html(ui.section_title("全台概況", f"{ui.time_range(first_period)} · 顏色代表最高溫，黑框為目前選擇的縣市"))
+    html(ui.section_title(
+        "全台概況", f"{ui.time_range(first_period)} · 顏色代表最高溫，黑框為所選縣市，橘色虛線為有特報的縣市"
+    ))
     map_col, region_col = st.columns([1.35, 1], gap="large")
     with map_col:
-        render_map(all_forecasts, city)
+        render_map(all_forecasts, city, hazards)
     with region_col:
         st.caption("各區域平均溫度（金門、連江為離島，不列入）")
         render_regions(all_forecasts)
