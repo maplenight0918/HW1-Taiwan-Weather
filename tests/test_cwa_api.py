@@ -11,7 +11,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.cwa_api import CWAError, normalize_city, parse_forecast, weather_icon
+from src.cwa_api import (
+    CWAError,
+    normalize_city,
+    parse_all_forecasts,
+    parse_forecast,
+    weather_icon,
+)
 
 SAMPLE = json.loads((Path(__file__).parent / "sample_response.json").read_text("utf-8"))
 
@@ -50,6 +56,12 @@ def test_unknown_city_raises_cwa_error():
         pass
     else:
         raise AssertionError("查無縣市時應拋出 CWAError")
+
+
+def test_parse_all_forecasts_groups_by_city():
+    all_forecasts = parse_all_forecasts(SAMPLE)
+    assert list(all_forecasts) == ["臺中市"]
+    assert all_forecasts["臺中市"][0].max_temp == 29
 
 
 def test_weather_icon_mapping():

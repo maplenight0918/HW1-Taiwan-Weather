@@ -26,19 +26,20 @@ CITIES = [
     "臺東縣", "澎湖縣", "金門縣", "連江縣",
 ]
 
-# 用於 Streamlit 地圖的縣市政府所在地座標
+# 地圖上每個縣市的標記位置（都在縣市境內；北部、嘉義、中部等密集處
+# 刻意錯開，避免溫度標籤互相重疊，因此不一定是縣市政府所在地）
 CITY_COORDS = {
-    "臺北市": (25.0330, 121.5654), "新北市": (25.0169, 121.4627),
-    "基隆市": (25.1276, 121.7392), "桃園市": (24.9937, 121.3010),
-    "新竹市": (24.8039, 120.9647), "新竹縣": (24.8387, 121.0177),
-    "苗栗縣": (24.5602, 120.8214), "臺中市": (24.1477, 120.6736),
-    "彰化縣": (24.0518, 120.5161), "南投縣": (23.9609, 120.9719),
-    "雲林縣": (23.7092, 120.4313), "嘉義市": (23.4801, 120.4491),
-    "嘉義縣": (23.4518, 120.2555), "臺南市": (22.9999, 120.2269),
-    "高雄市": (22.6273, 120.3014), "屏東縣": (22.5519, 120.5487),
-    "宜蘭縣": (24.7021, 121.7378), "花蓮縣": (23.9872, 121.6015),
-    "臺東縣": (22.7583, 121.1444), "澎湖縣": (23.5655, 119.5663),
-    "金門縣": (24.4321, 118.3171), "連江縣": (26.1608, 119.9496),
+    "臺北市": (25.04, 121.53), "新北市": (24.87, 121.62),
+    "基隆市": (25.14, 121.78), "桃園市": (24.93, 121.22),
+    "新竹市": (24.80, 120.95), "新竹縣": (24.62, 121.18),
+    "苗栗縣": (24.50, 120.85), "臺中市": (24.24, 120.85),
+    "彰化縣": (24.03, 120.50), "南投縣": (23.85, 120.95),
+    "雲林縣": (23.70, 120.43), "嘉義市": (23.48, 120.45),
+    "嘉義縣": (23.30, 120.58), "臺南市": (23.05, 120.25),
+    "高雄市": (23.00, 120.68), "屏東縣": (22.55, 120.58),
+    "宜蘭縣": (24.65, 121.70), "花蓮縣": (23.75, 121.40),
+    "臺東縣": (22.80, 121.10), "澎湖縣": (23.57, 119.58),
+    "金門縣": (24.44, 118.36), "連江縣": (26.16, 119.95),
 }
 
 # API 回傳的天氣要素代碼 -> 本專案使用的欄位名稱
@@ -124,16 +125,20 @@ def normalize_city(city: str) -> str:
     return city.strip().replace("台", "臺")
 
 
-def fetch_forecast(api_key: str, city: str) -> dict[str, Any]:
-    """向 CWA API 查詢指定縣市的 36 小時預報，回傳原始 JSON。"""
+def fetch_forecast(api_key: str, city: Optional[str] = None) -> dict[str, Any]:
+    """向 CWA API 查詢 36 小時預報，回傳原始 JSON。
+
+    city 省略時一次取得全部 22 縣市（地圖需要全部資料）。
+    """
     if not api_key:
         raise CWAError("尚未設定 CWA API 金鑰。")
 
     params = {
         "Authorization": api_key,
-        "locationName": normalize_city(city),
         "elementName": ",".join(ELEMENT_FIELDS),
     }
+    if city:
+        params["locationName"] = normalize_city(city)
 
     try:
         response = requests.get(API_URL, params=params, timeout=REQUEST_TIMEOUT)
@@ -203,18 +208,8 @@ def _short_time(timestamp: str) -> str:
         return str(timestamp)
 
 
-def parse_forecast(payload: dict[str, Any], city: str) -> list[ForecastPeriod]:
-    """把原始 JSON 整理成依時間排序的 ForecastPeriod 清單。"""
-    target = normalize_city(city)
-    locations = _locations(payload)
-
-    location = next(
-        (loc for loc in locations if loc.get("locationName") == target),
-        None,
-    )
-    if location is None:
-        raise CWAError(f"CWA API 回應中沒有「{city}」的預報資料。")
-
+def _parse_location(location: dict[str, Any]) -> list[ForecastPeriod]:
+    """把單一縣市的 weatherElement 整理成依時間排序的 ForecastPeriod 清單。"""
     # 以 (開始時間, 結束時間) 為 key 把各天氣要素併成同一個時段
     periods: dict[tuple[str, str], dict[str, Any]] = {}
     for element in location.get("weatherElement", []):
@@ -227,10 +222,7 @@ def parse_forecast(payload: dict[str, Any], city: str) -> list[ForecastPeriod]:
             value = (slot.get("parameter") or {}).get("parameterName")
             periods.setdefault(key, {})[field] = value
 
-    if not periods:
-        raise CWAError(f"「{city}」目前沒有可用的預報時段資料。")
-
-    forecasts = [
+    return [
         ForecastPeriod(
             start_time=start,
             end_time=end,
@@ -242,11 +234,48 @@ def parse_forecast(payload: dict[str, Any], city: str) -> list[ForecastPeriod]:
         )
         for (start, end), values in sorted(periods.items())
     ]
+
+
+def parse_forecast(payload: dict[str, Any], city: str) -> list[ForecastPeriod]:
+    """從原始 JSON 取出指定縣市的預報。"""
+    target = normalize_city(city)
+    location = next(
+        (loc for loc in _locations(payload) if loc.get("locationName") == target),
+        None,
+    )
+    if location is None:
+        raise CWAError(f"CWA API 回應中沒有「{city}」的預報資料。")
+
+    forecasts = _parse_location(location)
+    if not forecasts:
+        raise CWAError(f"「{city}」目前沒有可用的預報時段資料。")
     return forecasts
 
 
+def parse_all_forecasts(payload: dict[str, Any]) -> dict[str, list[ForecastPeriod]]:
+    """從原始 JSON 取出所有縣市的預報，回傳 {縣市名稱: 預報清單}。
+
+    沒有時段資料的縣市會被略過，由 UI 層顯示「查無資料」。
+    """
+    all_forecasts = {}
+    for location in _locations(payload):
+        name = location.get("locationName")
+        forecasts = _parse_location(location)
+        if name and forecasts:
+            all_forecasts[name] = forecasts
+
+    if not all_forecasts:
+        raise CWAError("CWA API 回應中沒有任何可用的預報資料。")
+    return all_forecasts
+
+
+def get_all_forecasts(api_key: str) -> dict[str, list[ForecastPeriod]]:
+    """一次取得並解析全部縣市的預報（只呼叫一次 API）。"""
+    return parse_all_forecasts(fetch_forecast(api_key))
+
+
 def get_city_forecast(api_key: str, city: str) -> list[ForecastPeriod]:
-    """取得並解析指定縣市的預報，是 UI 層唯一需要呼叫的函式。"""
+    """取得並解析單一縣市的預報。"""
     return parse_forecast(fetch_forecast(api_key, city), city)
 
 
