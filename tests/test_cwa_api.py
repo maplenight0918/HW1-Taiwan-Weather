@@ -113,6 +113,28 @@ def test_describe_period_uses_relative_day_names():
     assert describe_period("壞掉的時間", now) == "預報時段"
 
 
+def test_error_message_never_contains_api_key():
+    import requests
+    import src.cwa_api as api
+
+    secret = "CWA-SECRET-KEY-SHOULD-NOT-LEAK"
+
+    def failing_get(*args, **kwargs):
+        # 模擬 requests 的錯誤訊息裡帶有完整網址與金鑰的情況
+        raise requests.exceptions.SSLError(f"Max retries exceeded with url: /x?Authorization={secret}")
+
+    original_get = api._session.get
+    api._session.get = failing_get
+    try:
+        api.fetch_forecast(secret)
+    except CWAError as error:
+        assert secret not in str(error)
+    else:
+        raise AssertionError("應拋出 CWAError")
+    finally:
+        api._session.get = original_get
+
+
 if __name__ == "__main__":
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
     for test in tests:

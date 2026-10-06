@@ -10,11 +10,13 @@
 from __future__ import annotations
 
 import os
+import ssl
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import requests
+from requests.adapters import HTTPAdapter
 
 API_URL = "https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-C0032-001"
 REQUEST_TIMEOUT = 15  # 秒
@@ -60,6 +62,30 @@ ELEMENT_FIELDS = {
     "MaxT": "max_temp",   # 最高溫（°C）
     "CI": "comfort",      # 舒適度
 }
+
+
+class _CWASSLAdapter(HTTPAdapter):
+    """處理 CWA 憑證在新版 Python 上驗證失敗的問題。
+
+    CWA 的 HTTPS 憑證缺少 Subject Key Identifier 欄位，Python 3.13 起預設啟用
+    VERIFY_X509_STRICT 嚴格檢查，會因此拒絕連線（CERTIFICATE_VERIFY_FAILED）。
+    這裡「仍然驗證憑證」，只關閉這一項額外的嚴格檢查；不可改用 verify=False。
+    """
+
+    def init_poolmanager(self, *args, **kwargs):
+        context = ssl.create_default_context()
+        context.verify_flags &= ~getattr(ssl, "VERIFY_X509_STRICT", 0)
+        kwargs["ssl_context"] = context
+        return super().init_poolmanager(*args, **kwargs)
+
+
+def _create_session() -> requests.Session:
+    session = requests.Session()
+    session.mount("https://opendata.cwa.gov.tw", _CWASSLAdapter())
+    return session
+
+
+_session = _create_session()
 
 
 class CWAError(Exception):
@@ -143,19 +169,25 @@ def fetch_forecast(api_key: str, city: Optional[str] = None) -> dict[str, Any]:
     if not api_key:
         raise CWAError("尚未設定 CWA API 金鑰。")
 
-    params = {
-        "Authorization": api_key,
-        "elementName": ",".join(ELEMENT_FIELDS),
-    }
+    # 金鑰放在 HTTP header 而非網址參數，避免出現在網址、錯誤訊息或紀錄中
+    headers = {"Authorization": api_key}
+    params = {"elementName": ",".join(ELEMENT_FIELDS)}
     if city:
         params["locationName"] = normalize_city(city)
 
+    # 錯誤訊息只寫原因分類，不附上原始例外內容（其中可能含有網址等細節）
     try:
-        response = requests.get(API_URL, params=params, timeout=REQUEST_TIMEOUT)
+        response = _session.get(
+            API_URL, headers=headers, params=params, timeout=REQUEST_TIMEOUT
+        )
     except requests.exceptions.Timeout as exc:
         raise CWAError("連線 CWA API 逾時，請稍後再試。") from exc
+    except requests.exceptions.SSLError as exc:
+        raise CWAError("與 CWA API 的安全連線（SSL 憑證驗證）失敗。") from exc
+    except requests.exceptions.ConnectionError as exc:
+        raise CWAError("無法連線到 CWA API，請檢查網路連線。") from exc
     except requests.exceptions.RequestException as exc:
-        raise CWAError(f"無法連線到 CWA API：{exc}") from exc
+        raise CWAError(f"呼叫 CWA API 時發生錯誤（{type(exc).__name__}）。") from exc
 
     if response.status_code == 401:
         raise CWAError("API 金鑰無效或已失效（HTTP 401），請確認金鑰設定。")
