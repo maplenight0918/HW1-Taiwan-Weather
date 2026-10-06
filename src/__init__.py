@@ -8,6 +8,7 @@ from .cwa_api import (
     get_all_forecasts,
     get_api_key,
     get_city_forecast,
+    regional_averages,
     weather_icon,
 )
 
@@ -19,5 +20,6 @@ __all__ = [
     "get_all_forecasts",
     "get_api_key",
     "get_city_forecast",
+    "regional_averages",
     "weather_icon",
 ]

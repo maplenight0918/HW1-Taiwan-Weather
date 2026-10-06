@@ -14,6 +14,7 @@ from src.cwa_api import (
     CWAError,
     get_all_forecasts,
     get_api_key,
+    regional_averages,
     weather_icon,
 )
 
@@ -139,6 +140,27 @@ def render_charts(forecasts) -> None:
         st.altair_chart(bars + labels, use_container_width=True)
 
 
+def render_regional_averages(all_forecasts) -> None:
+    """以四張 metric 卡片顯示北、中、南、東四區的平均溫度。"""
+    period_label = next(iter(all_forecasts.values()))[0].period_label
+    st.subheader("🌡️ 各區域平均溫度")
+    st.caption(f"時段：{period_label}　｜　平均溫度為各縣市最低溫與最高溫平均值的中間值")
+
+    for column, region in zip(st.columns(4), regional_averages(all_forecasts)):
+        with column:
+            if region["avg_temp"] is None:
+                st.metric(region["region"], "無資料")
+                continue
+            st.metric(region["region"], f"{region['avg_temp']} °C")
+            pop_text = "無資料" if region["avg_pop"] is None else f"{region['avg_pop']} %"
+            st.caption(
+                f"最低 {region['avg_min']} °C ／ 最高 {region['avg_max']} °C  \n"
+                f"平均降雨機率 {pop_text}"
+            )
+            with st.expander(f"包含 {len(region['cities'])} 個縣市"):
+                st.write("、".join(region["cities"]))
+
+
 def build_map_data(all_forecasts) -> pd.DataFrame:
     """整理每個縣市「最近時段」的預報，作為地圖的資料。"""
     rows = []
@@ -252,6 +274,8 @@ def main() -> None:
         render_forecast_table(forecasts)
         render_charts(forecasts)
 
+    st.divider()
+    render_regional_averages(all_forecasts)
     st.divider()
     render_map(all_forecasts, city)
 

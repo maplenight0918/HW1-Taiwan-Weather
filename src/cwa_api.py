@@ -42,6 +42,14 @@ CITY_COORDS = {
     "金門縣": (24.44, 118.36), "連江縣": (26.16, 119.95),
 }
 
+# 依國家發展委員會的區域劃分；金門縣、連江縣屬離島，不列入四區平均
+REGIONS = {
+    "北部": ["臺北市", "新北市", "基隆市", "桃園市", "新竹市", "新竹縣", "宜蘭縣"],
+    "中部": ["苗栗縣", "臺中市", "彰化縣", "南投縣", "雲林縣"],
+    "南部": ["嘉義市", "嘉義縣", "臺南市", "高雄市", "屏東縣", "澎湖縣"],
+    "東部": ["花蓮縣", "臺東縣"],
+}
+
 # API 回傳的天氣要素代碼 -> 本專案使用的欄位名稱
 ELEMENT_FIELDS = {
     "Wx": "weather",      # 天氣現象
@@ -272,6 +280,43 @@ def parse_all_forecasts(payload: dict[str, Any]) -> dict[str, list[ForecastPerio
 def get_all_forecasts(api_key: str) -> dict[str, list[ForecastPeriod]]:
     """一次取得並解析全部縣市的預報（只呼叫一次 API）。"""
     return parse_all_forecasts(fetch_forecast(api_key))
+
+
+def _average(values: list[Optional[int]]) -> Optional[float]:
+    """忽略缺值後取平均（四捨五入到小數一位），全部缺值時回傳 None。"""
+    valid = [v for v in values if v is not None]
+    return round(sum(valid) / len(valid), 1) if valid else None
+
+
+def regional_averages(
+    all_forecasts: dict[str, list[ForecastPeriod]], period_index: int = 0
+) -> list[dict[str, Any]]:
+    """計算北、中、南、東四區在指定時段的平均氣溫與降雨機率。
+
+    回傳每區一筆：region、cities（實際有資料的縣市）、avg_min、avg_max、avg_temp、avg_pop。
+    """
+    results = []
+    for region, cities in REGIONS.items():
+        periods = [
+            all_forecasts[city][period_index]
+            for city in cities
+            if len(all_forecasts.get(city, [])) > period_index
+        ]
+        avg_min = _average([p.min_temp for p in periods])
+        avg_max = _average([p.max_temp for p in periods])
+        results.append(
+            {
+                "region": region,
+                "cities": [city for city in cities if city in all_forecasts],
+                "avg_min": avg_min,
+                "avg_max": avg_max,
+                # 平均溫度 = 平均最低溫與平均最高溫的中間值
+                "avg_temp": None if avg_min is None or avg_max is None
+                else round((avg_min + avg_max) / 2, 1),
+                "avg_pop": _average([p.pop for p in periods]),
+            }
+        )
+    return results
 
 
 def get_city_forecast(api_key: str, city: str) -> list[ForecastPeriod]:

@@ -12,10 +12,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.cwa_api import (
+    CITIES,
+    REGIONS,
     CWAError,
+    ForecastPeriod,
     normalize_city,
     parse_all_forecasts,
     parse_forecast,
+    regional_averages,
     weather_icon,
 )
 
@@ -62,6 +66,30 @@ def test_parse_all_forecasts_groups_by_city():
     all_forecasts = parse_all_forecasts(SAMPLE)
     assert list(all_forecasts) == ["臺中市"]
     assert all_forecasts["臺中市"][0].max_temp == 29
+
+
+def test_regions_cover_main_island_cities_once():
+    assigned = [city for cities in REGIONS.values() for city in cities]
+    assert len(assigned) == len(set(assigned))
+    assert set(CITIES) - set(assigned) == {"金門縣", "連江縣"}
+
+
+def _period(min_temp, max_temp, pop):
+    return ForecastPeriod("2026-10-06 18:00:00", "2026-10-07 06:00:00", "晴", min_temp, max_temp, pop, "舒適")
+
+
+def test_regional_averages_ignore_missing_values():
+    all_forecasts = {
+        "花蓮縣": [_period(24, 28, 10)],
+        "臺東縣": [_period(26, None, None)],
+    }
+    east = next(r for r in regional_averages(all_forecasts) if r["region"] == "東部")
+    assert east["avg_min"] == 25.0
+    assert east["avg_max"] == 28.0  # 臺東縣缺最高溫，只用花蓮縣
+    assert east["avg_temp"] == 26.5
+    assert east["avg_pop"] == 10.0
+    north = next(r for r in regional_averages(all_forecasts) if r["region"] == "北部")
+    assert north["avg_temp"] is None  # 完全沒有資料
 
 
 def test_weather_icon_mapping():
